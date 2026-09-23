@@ -16,10 +16,8 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconTerminal,
-  IconServer,
   IconActivity,
   IconAlertTriangle,
-  IconExternalLink,
 } from '@/components/Icons';
 
 interface EndpointParam {
@@ -33,17 +31,22 @@ interface ApiEndpoint {
   module: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
-  name: string;
+  name?: string;
   action: string;
-  auth_required: boolean;
-  roles: string[];
+  auth?: string;
+  auth_required?: boolean;
+  roles?: string[];
   description: string;
-  parameters: EndpointParam[] | null;
+  parameters?: any;
+  formatted_parameters?: EndpointParam[];
+  responses?: Record<string, string>;
+  rate_limit?: string;
 }
 
 interface EndpointsCatalogResponse {
-  api_version: string;
-  base_url: string;
+  api_version?: string;
+  base_url?: string;
+  server_url?: string;
   total_endpoints: number;
   generated_at: string;
   endpoints: ApiEndpoint[];
@@ -56,6 +59,66 @@ interface TestPingResult {
   success: boolean;
   data: any;
   error?: string;
+}
+
+// Resilient parsing helpers
+function getEndpointRoles(ep: ApiEndpoint): string[] {
+  if (Array.isArray(ep.roles) && ep.roles.length > 0) {
+    return ep.roles;
+  }
+  const authStr = String(ep.auth || '').toLowerCase();
+  if (authStr.includes('public')) return ['public'];
+  if (authStr.includes('admin')) return ['admin'];
+  return ['cashier', 'admin'];
+}
+
+function isAuthRequired(ep: ApiEndpoint): boolean {
+  if (typeof ep.auth_required === 'boolean') {
+    return ep.auth_required;
+  }
+  const authStr = String(ep.auth || '').toLowerCase();
+  return !authStr.includes('public');
+}
+
+function getParametersList(ep: ApiEndpoint): EndpointParam[] {
+  if (Array.isArray(ep.formatted_parameters) && ep.formatted_parameters.length > 0) {
+    return ep.formatted_parameters;
+  }
+  const raw = ep.parameters;
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((item: any) => {
+      if (typeof item === 'object' && item !== null && 'name' in item) {
+        return {
+          name: String(item.name),
+          type: String(item.type || 'string'),
+          required: Boolean(item.required),
+          description: String(item.description || ''),
+        };
+      }
+      return {
+        name: String(item),
+        type: 'string',
+        required: false,
+        description: '',
+      };
+    });
+  }
+  if (typeof raw === 'object') {
+    return Object.entries(raw).map(([key, val]) => {
+      const descStr = String(val);
+      const isReq = descStr.toLowerCase().includes('required');
+      const parts = descStr.split(',');
+      const typeStr = parts[0]?.trim() || 'string';
+      return {
+        name: key,
+        type: typeStr,
+        required: isReq,
+        description: descStr,
+      };
+    });
+  }
+  return [];
 }
 
 export default function AdminEndpointsPage() {
@@ -119,6 +182,7 @@ export default function AdminEndpointsPage() {
     const key = `${ep.method}:${ep.path}`;
     setPingingPath(key);
     const start = performance.now();
+    const paramsList = getParametersList(ep);
 
     try {
       // Map API path to client endpoint format
@@ -126,7 +190,6 @@ export default function AdminEndpointsPage() {
       
       // Determine if it has route params like {id}
       if (relativePath.includes('{')) {
-        // Parameterized endpoint preview
         const duration = Math.round(performance.now() - start);
         setPingResults((prev) => ({
           ...prev,
@@ -139,7 +202,7 @@ export default function AdminEndpointsPage() {
               info: 'This endpoint requires dynamic URI path parameters (such as an ID). Review parameter schema below.',
               path: ep.path,
               method: ep.method,
-              parameters: ep.parameters,
+              parameters: paramsList,
             },
           },
         }));
@@ -162,7 +225,6 @@ export default function AdminEndpointsPage() {
           },
         }));
       } else {
-        // Mutating endpoints preview safe payload
         const duration = Math.round(performance.now() - start);
         setPingResults((prev) => ({
           ...prev,
@@ -172,11 +234,11 @@ export default function AdminEndpointsPage() {
             timeMs: duration,
             success: true,
             data: {
-              info: 'Mutating requests (POST, PUT, DELETE) are safety protected against accidental database corruption in explorer mode.',
+              info: 'Mutating requests (POST, PUT, DELETE) are safety protected against accidental database modifications in explorer mode.',
               method: ep.method,
               path: ep.path,
               controller: ep.action,
-              expectedPayload: ep.parameters?.map((p) => ({
+              expectedPayload: paramsList.map((p) => ({
                 field: p.name,
                 type: p.type,
                 required: p.required,
@@ -210,7 +272,9 @@ export default function AdminEndpointsPage() {
   const modulesList = useMemo(() => {
     if (!catalog?.endpoints) return [];
     const set = new Set<string>();
-    catalog.endpoints.forEach((e) => set.add(e.module));
+    catalog.endpoints.forEach((e) => {
+      if (e.module) set.add(e.module);
+    });
     return Array.from(set);
   }, [catalog]);
 
@@ -218,6 +282,10 @@ export default function AdminEndpointsPage() {
   const filteredEndpoints = useMemo(() => {
     if (!catalog?.endpoints) return [];
     return catalog.endpoints.filter((ep) => {
+      const roles = getEndpointRoles(ep);
+      const authReq = isAuthRequired(ep);
+      const isAdminOnly = roles.includes('admin') && !roles.includes('cashier');
+
       // Method filter
       if (selectedMethod !== 'ALL' && ep.method !== selectedMethod) {
         return false;
@@ -227,23 +295,24 @@ export default function AdminEndpointsPage() {
         return false;
       }
       // Access filter
-      if (selectedAccess === 'PUBLIC' && ep.auth_required) {
+      if (selectedAccess === 'PUBLIC' && authReq) {
         return false;
       }
-      if (selectedAccess === 'ADMIN' && (!ep.auth_required || !ep.roles.includes('admin') || ep.roles.includes('cashier'))) {
+      if (selectedAccess === 'ADMIN' && !isAdminOnly) {
         return false;
       }
-      if (selectedAccess === 'STAFF' && (!ep.auth_required || !ep.roles.includes('cashier'))) {
+      if (selectedAccess === 'STAFF' && (!authReq || !roles.includes('cashier'))) {
         return false;
       }
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesPath = ep.path.toLowerCase().includes(q);
-        const matchesDesc = ep.description.toLowerCase().includes(q);
-        const matchesAction = ep.action.toLowerCase().includes(q);
-        const matchesModule = ep.module.toLowerCase().includes(q);
-        const matchesParams = ep.parameters?.some((p) => p.name.toLowerCase().includes(q));
+        const matchesPath = ep.path?.toLowerCase().includes(q);
+        const matchesDesc = ep.description?.toLowerCase().includes(q);
+        const matchesAction = ep.action?.toLowerCase().includes(q);
+        const matchesModule = ep.module?.toLowerCase().includes(q);
+        const paramsList = getParametersList(ep);
+        const matchesParams = paramsList.some((p) => p.name.toLowerCase().includes(q));
         if (!matchesPath && !matchesDesc && !matchesAction && !matchesModule && !matchesParams) {
           return false;
         }
@@ -267,8 +336,10 @@ export default function AdminEndpointsPage() {
       if (e.method === 'POST') post++;
       if (e.method === 'PUT') put++;
       if (e.method === 'DELETE') del++;
-      if (!e.auth_required) publicCount++;
-      if (e.roles.includes('admin') && !e.roles.includes('cashier')) adminOnly++;
+      const authReq = isAuthRequired(e);
+      const roles = getEndpointRoles(e);
+      if (!authReq) publicCount++;
+      if (roles.includes('admin') && !roles.includes('cashier')) adminOnly++;
     });
 
     return {
@@ -528,6 +599,10 @@ export default function AdminEndpointsPage() {
               const isCopied = copiedPath === ep.path;
               const isPinging = pingingPath === epKey;
               const pingResult = pingResults[epKey];
+              const roles = getEndpointRoles(ep);
+              const authReq = isAuthRequired(ep);
+              const isAdminOnly = roles.includes('admin') && !roles.includes('cashier');
+              const paramsList = getParametersList(ep);
 
               return (
                 <div
@@ -572,11 +647,11 @@ export default function AdminEndpointsPage() {
                       </span>
 
                       {/* Access Badge */}
-                      {!ep.auth_required ? (
+                      {!authReq ? (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
                           Public
                         </span>
-                      ) : ep.roles.includes('admin') && !ep.roles.includes('cashier') ? (
+                      ) : isAdminOnly ? (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/40 text-[#6b21a8] dark:text-[#d8b4fe] border border-purple-200 dark:border-purple-800/50 flex items-center gap-1">
                           <IconLock className="w-2.5 h-2.5" />
                           Admin Only
@@ -626,10 +701,10 @@ export default function AdminEndpointsPage() {
                       <div>
                         <span className="font-semibold text-[#191817] dark:text-[#f3f3f5]">Handler:</span> {ep.action}
                       </div>
-                      {ep.parameters && (
+                      {paramsList.length > 0 && (
                         <div>
                           <span className="font-semibold text-[#191817] dark:text-[#f3f3f5]">Parameters:</span>{' '}
-                          {ep.parameters.length} defined
+                          {paramsList.length} defined
                         </div>
                       )}
                     </div>
@@ -645,7 +720,7 @@ export default function AdminEndpointsPage() {
                           <span>Request Parameters & Schema</span>
                         </div>
 
-                        {ep.parameters && ep.parameters.length > 0 ? (
+                        {paramsList.length > 0 ? (
                           <div className="overflow-x-auto rounded-lg border border-[#e3e1da] dark:border-[#252830] bg-white dark:bg-[#17191e]">
                             <table className="w-full text-left text-xs border-collapse">
                               <thead>
@@ -657,7 +732,7 @@ export default function AdminEndpointsPage() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-[#e3e1da]/60 dark:divide-[#252830]/60">
-                                {ep.parameters.map((param) => (
+                                {paramsList.map((param) => (
                                   <tr key={param.name} className="hover:bg-[#faf9f7] dark:hover:bg-[#1a1d24]">
                                     <td className="py-2 px-3 font-mono font-semibold text-[#6b21a8] dark:text-[#d8b4fe]">
                                       {param.name}
@@ -702,7 +777,7 @@ export default function AdminEndpointsPage() {
                             type="button"
                             onClick={() => {
                               const curlStr = `curl -X ${ep.method} "http://localhost:8000${ep.path}" \\\n  -H "Accept: application/json"${
-                                ep.auth_required ? ' \\\n  -H "Authorization: Bearer <TOKEN>"' : ''
+                                authReq ? ' \\\n  -H "Authorization: Bearer <TOKEN>"' : ''
                               }${ep.method !== 'GET' ? ' \\\n  -H "Content-Type: application/json" \\\n  -d \'{}\'' : ''}`;
                               handleCopy(curlStr, `curl:${epKey}`);
                             }}
@@ -720,7 +795,7 @@ export default function AdminEndpointsPage() {
                         </div>
                         <pre className="p-3 rounded-lg bg-[#111215] text-[#fbbf24] text-[11px] font-mono overflow-x-auto border border-[#252830]">
                           {`curl -X ${ep.method} "http://localhost:8000${ep.path}" \\
-  -H "Accept: application/json"${ep.auth_required ? ' \\\n  -H "Authorization: Bearer <ADMIN_TOKEN>"' : ''}${
+  -H "Accept: application/json"${authReq ? ' \\\n  -H "Authorization: Bearer <ADMIN_TOKEN>"' : ''}${
                             ep.method !== 'GET' ? ' \\\n  -H "Content-Type: application/json" \\\n  -d \'{...}\'' : ''
                           }`}
                         </pre>

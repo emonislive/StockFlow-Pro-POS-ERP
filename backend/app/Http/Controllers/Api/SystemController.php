@@ -462,13 +462,47 @@ class SystemController extends Controller
             ],
         ];
 
+        $formattedCatalog = array_map(function ($ep) {
+            $authStr = strtolower($ep['auth'] ?? '');
+            $isPublic = str_contains($authStr, 'public');
+            $isAdminOnly = str_contains($authStr, 'admin');
+
+            $roles = $isPublic ? ['public'] : ($isAdminOnly ? ['admin'] : ['cashier', 'admin']);
+
+            $paramList = [];
+            if (!empty($ep['parameters']) && is_array($ep['parameters'])) {
+                foreach ($ep['parameters'] as $name => $desc) {
+                    if (is_array($desc) && isset($desc['name'])) {
+                        $paramList[] = $desc;
+                    } else {
+                        $descStr = (string)$desc;
+                        $parts = array_map('trim', explode(',', $descStr));
+                        $type = $parts[0] ?? 'string';
+                        $isRequired = str_contains(strtolower($descStr), 'required');
+                        $paramList[] = [
+                            'name' => (string)$name,
+                            'type' => $type,
+                            'required' => $isRequired,
+                            'description' => $descStr,
+                        ];
+                    }
+                }
+            }
+
+            return array_merge($ep, [
+                'auth_required' => !$isPublic,
+                'roles' => $roles,
+                'formatted_parameters' => $paramList,
+            ]);
+        }, $endpoints);
+
         return response()->json([
             'success' => true,
             'data' => [
-                'total_endpoints' => count($endpoints),
+                'total_endpoints' => count($formattedCatalog),
                 'generated_at' => now()->toIso8601String(),
                 'server_url' => config('app.url', 'http://127.0.0.1:8000'),
-                'endpoints' => $endpoints,
+                'endpoints' => $formattedCatalog,
             ],
         ]);
     }
