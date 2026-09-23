@@ -1,0 +1,48 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+auth.json
+
+# Databases
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+backend/database/database.sqlite
+
+# Dependencies & Vendors
+node_modules/
+vendor/
+.pnpm-store/
+
+# Next.js Build & Cache
+frontend/.next/
+frontend/out/
+.next/
+out/
+
+# Laravel Storage & Cache
+backend/storage/*.key
+backend/storage/logs/
+backend/storage/framework/cache/
+backend/storage/framework/sessions/
+backend/storage/framework/views/
+backend/storage/pail/
+backend/bootstrap/cache/*.php
+
+# IDE & OS
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Task & Scratch Artifacts
+scratch/
+.system_generated/

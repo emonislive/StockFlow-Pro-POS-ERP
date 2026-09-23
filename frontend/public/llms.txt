@@ -1,0 +1,16 @@
+# StockFlow Pro POS & ERP
+
+> Fast, resilient Point of Sale (POS) and Enterprise Resource Planning (ERP) platform tailored for retail, grocery stores, and micro-enterprises.
+
+## Core Capabilities
+- **High-Velocity POS Terminal**: Barcode scanning, multi-method tender (Cash, Card, MFS / bKash / Nagad), instant thermal receipt generation (80mm/58mm format).
+- **Dual-Mode Sync & Offline Resilience**: In-memory and IndexedDB local cart cache with optimistic checkouts and background retry queues.
+- **Baki Khata (Customer Credit Ledger)**: Account-level receivable management, credit limit validation, and incremental debt repayment collection.
+- **Real-Time Inventory & Stock Adjustments**: Multi-category product tracking, SKU/barcode lookup, cost and profit margin analysis, and granular audit trail logging.
+- **Financial Analytics & P&L Statements**: Automated Gross Margin, Operating Expense categorization, and Net Profit calculations.
+- **Enterprise Security**: Sanctum token authentication, rate-limiting on sensitive endpoints, secure HTTP headers, and strict SQL parameterization.
+
+## Architecture
+- **Backend**: Laravel 11/13 REST API with SQLite / MySQL dual compatibility, Eloquent ORM, and database transaction locking.
+- **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, decoupled modular architecture.
+- **API Spec**: Standardized JSON responses with status codes, validation error bags, and metadata pagination.
